@@ -105,11 +105,42 @@ app.post('/sms', async (req, res) => {
     const minMs = 35 * 60 * 1000;
     const maxMs = 8 * 60 * 60 * 1000;
     const delayMs = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+    const sendAt = new Date(Date.now() + delayMs);
 
     console.log(`📩 From ${from}: ${incomingMsg}`);
     console.log(`🕒 Will reply in ${Math.round(delayMs / 60000)} minutes`);
 
-    // Schedule the reply
+    // Look up user_id and number_id based on the Twilio number
+    const { data: numberRow, error: numberError } = await supabase
+      .from('numbers')
+      .select('id, user_id')
+      .eq('twilio_number', to)
+      .single();
+
+    if (numberError || !numberRow) {
+      console.error(`❌ Could not find Twilio number ${to} in DB`);
+      res.set('Content-Type', 'text/xml');
+      res.send('<Response></Response>');
+      return;
+    }
+
+    // Insert into the Supabase scheduled queue (for future cron processing/logging)
+    const { error: insertError } = await supabase.from('scheduled_messages').insert([{
+      user_id: numberRow.user_id,
+      number_id: numberRow.id,
+      to_phone: from,
+      from_phone: to,
+      body: reply,
+      send_at: sendAt
+    }]);
+
+    if (insertError) {
+      console.error('❌ Failed to insert scheduled message:', insertError.message);
+    } else {
+      console.log(`📝 Saved message to DB for ${from} at ${sendAt.toISOString()}`);
+    }
+
+    // Keep using setTimeout for now (until full cron handoff)
     const timer = setTimeout(async () => {
       try {
         await client.messages.create({
@@ -127,7 +158,7 @@ app.post('/sms', async (req, res) => {
 
     userTimers.set(from, { timer, message: incomingMsg });
 
-    // Respond to Twilio immediately so it doesn't retry
+    // Respond to Twilio immediately
     res.set('Content-Type', 'text/xml');
     res.send('<Response></Response>');
   } catch (err) {
