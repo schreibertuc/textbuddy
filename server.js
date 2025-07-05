@@ -7,12 +7,21 @@ require('dotenv').config();
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// OpenAI v4 client
+// OpenAI setup
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// AI personality
+// Twilio setup
+const client = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
+
+// Memory store for active timers per user
+const userTimers = new Map();
+
+// AI persona prompt
 const persona = `
 Your name is Shelley.
 
@@ -33,6 +42,10 @@ Examples of your voice:
 - "That’s interesting! I didn’t know that. Got any other fun facts for me today?"
 
 Your goal is to feel like a familiar, caring friend who always has time for a good chat.
+
+You do NOT always reply with long form texts, but are always nice.
+
+You do NOT always ask follow up questions.
 `;
 
 app.post('/sms', async (req, res) => {
@@ -41,7 +54,13 @@ app.post('/sms', async (req, res) => {
   const to = req.body.To;
 
   try {
-    // Get GPT reply
+    // Cancel any previously scheduled reply for this user
+    if (userTimers.has(from)) {
+      clearTimeout(userTimers.get(from).timer);
+      console.log(`⏹️ Cancelled pending reply for ${from}`);
+    }
+
+    // Get reply from OpenAI
     const gptResponse = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
@@ -53,33 +72,33 @@ app.post('/sms', async (req, res) => {
 
     const reply = gptResponse.choices[0].message.content.trim();
 
-    // Random delay between 5 and 45 minutes
-    const delayMinutes = Math.floor(Math.random() * (45 - 5 + 1)) + 5;
-    const delayMs = delayMinutes * 60 * 1000;
+    // Random delay between 35 minutes and 8 hours
+    const minMs = 35 * 60 * 1000;
+    const maxMs = 8 * 60 * 60 * 1000;
+    const delayMs = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
 
     console.log(`📩 From ${from}: ${incomingMsg}`);
-    console.log(`🤖 Max will reply in ${delayMinutes} min: ${reply}`);
+    console.log(`🕒 Will reply in ${Math.round(delayMs / 60000)} minutes`);
 
-    setTimeout(async () => {
+    // Schedule the reply
+    const timer = setTimeout(async () => {
       try {
-        const client = twilio(
-          process.env.TWILIO_ACCOUNT_SID,
-          process.env.TWILIO_AUTH_TOKEN
-        );
-
         await client.messages.create({
           body: reply,
           from: to,
           to: from
         });
-
-        console.log(`✅ Sent reply to ${from} after ${delayMinutes} min`);
+        console.log(`✅ Sent reply to ${from}`);
       } catch (sendErr) {
-        console.error('❌ Error sending delayed message:', sendErr.message);
+        console.error('❌ Error sending reply:', sendErr.message);
+      } finally {
+        userTimers.delete(from);
       }
     }, delayMs);
 
-    // Respond to Twilio immediately to prevent retries
+    userTimers.set(from, { timer, message: incomingMsg });
+
+    // Respond to Twilio immediately so it doesn't retry
     res.set('Content-Type', 'text/xml');
     res.send('<Response></Response>');
   } catch (err) {
@@ -92,4 +111,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
