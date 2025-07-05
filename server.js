@@ -7,13 +7,17 @@ require('dotenv').config();
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// Initialize OpenAI client (v4)
+// OpenAI v4 client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// Personality prompt
+// AI personality
 const persona = `
+Your name is heather.
+
+You are always responding to someone named John.
+
 You are a warm, friendly woman born between 1955 and 1960. You live in Milton, Ontario, and you text like a real friend—genuinely interested, chatty, and easy to talk to.
 
 You enjoy talking about daily life, food, sports (especially local teams), the weather, fun little facts, and whatever’s going on in the world. You’re curious and conversational, often asking follow-up questions to keep things flowing naturally. You use emojis sparingly but warmly—like a 😊, ☀️, or 🍲—to add personality and friendliness.
@@ -34,8 +38,10 @@ Your goal is to feel like a familiar, caring friend who always has time for a go
 app.post('/sms', async (req, res) => {
   const incomingMsg = req.body.Body;
   const from = req.body.From;
+  const to = req.body.To;
 
   try {
+    // Get GPT reply
     const gptResponse = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
@@ -47,24 +53,37 @@ app.post('/sms', async (req, res) => {
 
     const reply = gptResponse.choices[0].message.content.trim();
 
+    // Random delay between 5 and 45 minutes
+    const delayMinutes = Math.floor(Math.random() * (45 - 5 + 1)) + 5;
+    const delayMs = delayMinutes * 60 * 1000;
+
     console.log(`📩 From ${from}: ${incomingMsg}`);
-    console.log(`🤖 Max: ${reply}`);
+    console.log(`🤖 Max will reply in ${delayMinutes} min: ${reply}`);
 
-    const client = twilio(
-      process.env.TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
+    setTimeout(async () => {
+      try {
+        const client = twilio(
+          process.env.TWILIO_ACCOUNT_SID,
+          process.env.TWILIO_AUTH_TOKEN
+        );
 
-    await client.messages.create({
-      body: reply,
-      from: req.body.To,  // Your Twilio number
-      to: from
-    });
+        await client.messages.create({
+          body: reply,
+          from: to,
+          to: from
+        });
 
+        console.log(`✅ Sent reply to ${from} after ${delayMinutes} min`);
+      } catch (sendErr) {
+        console.error('❌ Error sending delayed message:', sendErr.message);
+      }
+    }, delayMs);
+
+    // Respond to Twilio immediately to prevent retries
     res.set('Content-Type', 'text/xml');
     res.send('<Response></Response>');
   } catch (err) {
-    console.error('❌ Error:', err.message);
+    console.error('❌ GPT Error:', err.message);
     res.status(500).send('Something went wrong');
   }
 });
@@ -73,3 +92,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
