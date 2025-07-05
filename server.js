@@ -14,7 +14,7 @@ const openai = new OpenAI({
 
 // AI personality
 const persona = `
-Your name is heather.
+Your name is Shelley.
 
 You are always responding to someone named John.
 
