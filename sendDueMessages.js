@@ -19,6 +19,7 @@ const client = twilio(
 
   const now = new Date().toISOString();
 
+  // 1. Get all unsent, unskipped messages due now
   const { data: messages, error } = await supabase
     .from('scheduled_messages')
     .select('*')
@@ -36,48 +37,53 @@ const client = twilio(
     process.exit(0);
   }
 
-  // Find the latest message per recipient
-  const latestByToPhone = {};
+  // 2. Group by (to_phone, from_phone) and only keep the newest
+  const latestByUser = new Map();
+
   for (const msg of messages) {
-    const key = msg.to_phone;
-    if (!latestByToPhone[key] || msg.send_at > latestByToPhone[key].send_at) {
-      latestByToPhone[key] = msg;
+    const key = `${msg.to_phone}_${msg.from_phone}`;
+    if (!latestByUser.has(key) || new Date(msg.send_at) > new Date(latestByUser.get(key).send_at)) {
+      latestByUser.set(key, msg);
     }
   }
 
-  const latestMessageIds = new Set(Object.values(latestByToPhone).map(msg => msg.id));
-  const skippedMessageIds = messages
-    .filter(msg => !latestMessageIds.has(msg.id))
-    .map(msg => msg.id);
+  // 3. Loop through messages and send the newest, skip others
+  for (const msg of messages) {
+    const key = `${msg.to_phone}_${msg.from_phone}`;
 
-  // Mark skipped messages
-  if (skippedMessageIds.length > 0) {
-    const { error: skipErr } = await supabase
-      .from('scheduled_messages')
-      .update({ skipped: true })
-      .in('id', skippedMessageIds);
-
-    if (skipErr) {
-      console.error('⚠️ Error marking skipped messages:', skipErr.message);
-    } else {
-      console.log(`🚫 Marked ${skippedMessageIds.length} messages as skipped`);
+    // Skip older message
+    if (latestByUser.get(key).id !== msg.id) {
+      await supabase
+        .from('scheduled_messages')
+        .update({ skipped: true })
+        .eq('id', msg.id);
+      console.log(`⏭️ Skipped older message to ${msg.to_phone}`);
+      continue;
     }
-  }
 
-  // Send latest messages only
-  for (const toPhone in latestByToPhone) {
-    const msg = latestByToPhone[toPhone];
     try {
+      // 4. Send via Twilio
       await client.messages.create({
         body: msg.body,
         from: msg.from_phone,
         to: msg.to_phone
       });
 
+      // 5. Mark as sent
       await supabase
         .from('scheduled_messages')
         .update({ sent: true })
         .eq('id', msg.id);
+
+      // 6. Log it in the messages table
+      await supabase.from('messages').insert([{
+        user_id: msg.user_id,
+        number_id: msg.number_id,
+        from_phone: msg.from_phone,
+        to_phone: msg.to_phone,
+        body: msg.body,
+        direction: 'outbound'
+      }]);
 
       console.log(`✅ Sent message to ${msg.to_phone}`);
     } catch (err) {
@@ -85,7 +91,7 @@ const client = twilio(
     }
   }
 
-  console.log('🏁 Done processing due messages.');
   process.exit(0);
 })();
+
 
