@@ -4,8 +4,33 @@ const OpenAI = require('openai');
 const twilio = require('twilio');
 require('dotenv').config();
 
+
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
+
+
+// SUPABASE SETUP
+// --------------------------------------------
+// Supabase is our backend database for:
+// - Mapping Twilio numbers to users
+// - Storing custom personas per user
+// - Logging all messages (inbound and outbound)
+// - Controlling whether the companion is active
+//
+// You'll need to create a Supabase project at https://supabase.com
+// Then get your project URL and service role key (for backend use only)
+//
+// Add the following to your .env file:
+// SUPABASE_URL=https://your-project.supabase.co
+// SUPABASE_SERVICE_KEY=your-secret-service-role-key
+// --------------------------------------------
+
+const { createClient } = require('@supabase/supabase-js');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
 
 // OpenAI setup
 const openai = new OpenAI({
@@ -17,6 +42,8 @@ const client = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
+
+
 
 // Memory store for active timers per user
 const userTimers = new Map();
