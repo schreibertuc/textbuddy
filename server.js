@@ -4,10 +4,8 @@ const OpenAI = require('openai');
 const twilio = require('twilio');
 require('dotenv').config();
 
-
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
-
 
 // SUPABASE SETUP
 // --------------------------------------------
@@ -42,8 +40,6 @@ const client = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
-
-
 
 // Memory store for active timers per user
 const userTimers = new Map();
@@ -100,10 +96,11 @@ app.post('/sms', async (req, res) => {
     });
 
     const reply = gptResponse.choices[0].message.content.trim();
+    console.log(`💬 Reply will be: "${reply}"`);
 
-    // Random delay between 35 minutes and 8 hours
-    const minMs = 35 * 60 * 1000;
-    const maxMs = 8 * 60 * 60 * 1000;
+    // Random delay between 15 minutes and 3 hours
+    const minMs = 15 * 60 * 1000;
+    const maxMs = 3 * 60 * 60 * 1000;
     const delayMs = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
     const sendAt = new Date(Date.now() + delayMs);
 
